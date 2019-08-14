@@ -155,7 +155,13 @@ namespace cryptonote
       * @return false if loading new checkpoints fails, or the block is not
       * added, otherwise true
       */
+<<<<<<< HEAD
      bool handle_incoming_block(const blobdata& block_blob, const block *b, block_verification_context& bvc, bool update_miner_blocktemplate = true);
+||||||| parent of a6cbad170... Enforce ordering of votes in HF13
+     bool handle_incoming_block(const blobdata& block_blob, const block *b, block_verification_context& bvc, checkpoint_t const *checkpoint, bool update_miner_blocktemplate = true);
+=======
+     bool handle_incoming_block(const blobdata& block_blob, const block *b, block_verification_context& bvc, checkpoint_t *checkpoint, bool update_miner_blocktemplate = true);
+>>>>>>> a6cbad170... Enforce ordering of votes in HF13
 
      /**
       * @copydoc Blockchain::prepare_handle_incoming_blocks
@@ -1082,7 +1088,6 @@ namespace cryptonote
      std::atomic<bool> m_update_available;
 
      std::string m_checkpoints_path; //!< path to json checkpoints file
-     time_t m_last_dns_checkpoints_update; //!< time when dns checkpoints were last updated
      time_t m_last_json_checkpoints_update; //!< time when json checkpoints were last updated
 
      std::atomic_flag m_checkpoints_updating; //!< set if checkpoints are currently updating to avoid multiple threads attempting to update at once

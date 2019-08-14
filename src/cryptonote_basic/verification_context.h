@@ -40,6 +40,7 @@ namespace cryptonote
   /************************************************************************/
   struct vote_verification_context
   {
+<<<<<<< HEAD
     bool m_verification_failed = false;    // generic "failed" flag
     bool m_invalid_block_height = false;   
     bool m_duplicate_voters = false;
@@ -50,6 +51,30 @@ namespace cryptonote
     bool m_incorrect_voting_group = false;
     bool m_invalid_vote_type = false;
     bool m_votes_not_sorted = false;
+||||||| parent of a6cbad170... Enforce ordering of votes in HF13
+    bool m_verification_failed;
+    bool m_invalid_block_height;
+    bool m_duplicate_voters;
+    bool m_validator_index_out_of_bounds;
+    bool m_worker_index_out_of_bounds;
+    bool m_signature_not_valid;
+    bool m_added_to_pool;
+    bool m_not_enough_votes;
+    bool m_incorrect_voting_group;
+    bool m_invalid_vote_type;
+=======
+    bool m_verification_failed;
+    bool m_invalid_block_height;
+    bool m_duplicate_voters;
+    bool m_validator_index_out_of_bounds;
+    bool m_worker_index_out_of_bounds;
+    bool m_signature_not_valid;
+    bool m_added_to_pool;
+    bool m_not_enough_votes;
+    bool m_incorrect_voting_group;
+    bool m_invalid_vote_type;
+    bool m_votes_not_sorted;
+>>>>>>> a6cbad170... Enforce ordering of votes in HF13
 
     BEGIN_KV_SERIALIZE_MAP()
       KV_SERIALIZE(m_verification_failed)

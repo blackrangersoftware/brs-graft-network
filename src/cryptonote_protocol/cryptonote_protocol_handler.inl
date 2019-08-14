@@ -342,11 +342,6 @@ namespace cryptonote
 
     if(m_core.have_block(hshd.top_id))
     {
-      if (target > m_core.get_current_blockchain_height())
-      {
-        MINFO(context << "peer is not ahead of us and we're syncing, disconnecting");
-        return false;
-      }
       context.m_state = cryptonote_connection_context::state_normal;
       if(is_inital && target == m_core.get_current_blockchain_height())
         on_connection_synchronized();
@@ -1392,7 +1387,6 @@ namespace cryptonote
                 return 1;
               }))
                 LOG_ERROR_CCONTEXT("span connection id not found");
-
               if (!m_core.cleanup_handle_incoming_blocks())
               {
                 LOG_PRINT_CCONTEXT_L0("Failure in cleanup_handle_incoming_blocks");

@@ -1268,22 +1268,6 @@ namespace cryptonote
     m_mempool.set_relayed(txs);
   }
   //-----------------------------------------------------------------------------------------------
-<<<<<<< HEAD
-||||||| parent of 8af377d2b... Unify and move responsibility of voting to quorum_cop (#615)
-  bool core::relay_deregister_votes()
-  {
-    NOTIFY_NEW_DEREGISTER_VOTE::request req;
-    req.votes = m_deregister_vote_pool.get_relayable_votes();
-    if (!req.votes.empty())
-    {
-      cryptonote_connection_context fake_context = AUTO_VAL_INIT(fake_context);
-      if (get_protocol()->relay_deregister_votes(req, fake_context))
-        m_deregister_vote_pool.set_relayed(req.votes);
-    }
-
-    return true;
-  }
-  //-----------------------------------------------------------------------------------------------
   bool core::relay_checkpoint_votes()
   {
     const time_t now = time(nullptr);
@@ -1504,13 +1488,9 @@ namespace cryptonote
   }
 
   //-----------------------------------------------------------------------------------------------
-  bool core::handle_incoming_block(const blobdata& block_blob, const block *b, block_verification_context& bvc, bool update_miner_blocktemplate)
+  bool core::handle_incoming_block(const blobdata& block_blob, const block *b, block_verification_context& bvc, checkpoint_t const *checkpoint, bool update_miner_blocktemplate)
   {
     TRY_ENTRY();
-    // load json checkpoints every 10min/hour respectively,
-    // and verify them with respect to what blocks we already have
-    CHECK_AND_ASSERT_MES(update_checkpoints(), false, "One or more checkpoints loaded from json conflicted with existing checkpoints.");
-
     bvc = boost::value_initialized<block_verification_context>();
 
     if (!check_incoming_block_size(block_blob))
@@ -1522,9 +1502,8 @@ namespace cryptonote
     if (((size_t)-1) <= 0xffffffff && block_blob.size() >= 0x3fffffff)
       MWARNING("This block's size is " << block_blob.size() << ", closing on the 32 bit limit");
 
-    // load json & DNS checkpoints every 10min/hour respectively,
-    // and verify them with respect to what blocks we already have
-    CHECK_AND_ASSERT_MES(update_checkpoints(), false, "One or more checkpoints loaded from json or dns conflicted with existing checkpoints.");
+    CHECK_AND_ASSERT_MES(update_checkpoints_from_json_file(), false, "One or more checkpoints loaded from json conflicted with existing checkpoints.");
+
 
     block lb;
     if (!b)
@@ -1538,9 +1517,42 @@ namespace cryptonote
       }
       b = &lb;
     }
-    add_new_block(*b, bvc);
+    // TODO(loki): This check should be redundant and included in
+    // verify_checkpoints once we enable it. It is not enabled until alternate
+    // quorums are implemented and merged
+    if (checkpoint)
+    {
+      if (b->major_version >= network_version_18_checkpointing)
+      {
+        if (checkpoint->signatures.size() > 1)
+        {
+          for (size_t i = 0; i < (checkpoint->signatures.size() - 1); i++)
+          {
+            auto curr = checkpoint->signatures[i].key_index;
+            auto next = checkpoint->signatures[i + 1].key_index;
+
+            if (curr >= next)
+            {
+              LOG_PRINT_L1("Voters in checkpoints are not given in ascending order, block failed");
+              bvc.m_verifivation_failed = true;
+              return false;
+            }
+          }
+        }
+      }
+      else
+      {
+        std::sort(checkpoint->signatures.begin(),
+                  checkpoint->signatures.end(),
+                  []( const rta_signature &lhs, const rta_signature &rhs) {
+                    return lhs.key_index < rhs.key_index;
+                  });
+      }
+    }
+
+    add_new_block(*b, bvc, checkpoint);
     if(update_miner_blocktemplate && bvc.m_added_to_main_chain)
-       update_miner_block_template();
+       m_miner.on_block_chain_update();
     return true;
 
     CATCH_ENTRY_L0("core::handle_incoming_block()", false);
@@ -1667,7 +1679,7 @@ namespace cryptonote
     {
       std::string main_message;
       if (m_offline)
-        main_message = "The daemon is running offline and will not attempt to sync to the Monero network.";
+        main_message = "The daemon is running offline and will not attempt to sync to the Graft network.";
       else
         main_message = "The daemon will start synchronizing with the network. This may take a long time to complete.";
       MGINFO_YELLOW(ENDL << "**********************************************************************" << ENDL
