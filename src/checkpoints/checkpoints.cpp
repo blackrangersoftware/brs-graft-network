@@ -151,7 +151,7 @@ namespace cryptonote
      
      return r;
  }
-  //---------------------------------------------------------------------------
+ //---------------------------------------------------------------------------
   bool checkpoints::is_in_checkpoint_zone(uint64_t height) const
   {
     uint64_t top_checkpoint_height = 0;

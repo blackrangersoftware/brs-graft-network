@@ -120,14 +120,14 @@ bool         load_checkpoints_from_json     (const std::string &json_hashfile_fu
    */
 class checkpoints
     : public cryptonote::BlockAddedHook,
-    public cryptonote::BlockchainDetachedHook
-{
-public:
-  bool block_added(const cryptonote::block& block, const std::vector<cryptonote::transaction>& txs, checkpoint_t const *checkpoint) override;
-  void blockchain_detached(uint64_t height, bool by_pop_blocks) override;
-  
-  bool get_checkpoint(uint64_t height, checkpoint_t &checkpoint) const;
-  /**
+      public cryptonote::BlockchainDetachedHook
+  {
+  public:
+    bool block_added(const cryptonote::block& block, const std::vector<cryptonote::transaction>& txs, checkpoint_t const *checkpoint) override;
+    void blockchain_detached(uint64_t height) override;
+
+    bool get_checkpoint(uint64_t height, checkpoint_t &checkpoint) const;
+    /**
      * @brief adds a checkpoint to the container
      *
      * @param height the height of the block the checkpoint is for

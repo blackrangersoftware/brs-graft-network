@@ -1053,17 +1053,16 @@ namespace cryptonote
     context.m_last_request_time = boost::date_time::not_a_date_time;
 
     // calculate size of request
-    size_t size = 0;
-    for (const auto &element : arg.txs) size += element.size();
-
-    size_t blocks_size = 0;
+    size_t blocks_size = 0, checkpoints_size = 0, txs_size = 0;
+    for (const auto &element : arg.txs) txs_size += element.size();
     for (const auto &element : arg.blocks) {
       blocks_size += element.block.size();
       for (const auto &tx : element.txs)
         blocks_size += tx.size();
+      checkpoints_size += element.checkpoint.size();
     }
-    size += blocks_size;
 
+    size_t size = blocks_size + checkpoints_size + txs_size;
     for (const auto &element : arg.missed_ids)
       size += sizeof(element.data);
 
@@ -1317,18 +1316,10 @@ namespace cryptonote
             LOG_ERROR_CCONTEXT("Failure in prepare_handle_incoming_blocks");
             return 1;
           }
-          if (!pblocks.empty() && pblocks.size() != blocks.size())
-          {
-            m_core.cleanup_handle_incoming_blocks();
-            LOG_ERROR_CCONTEXT("Internal error: blocks.size() != block_entry.txs.size()");
-            return 1;
-          }
 
-          uint64_t block_process_time_full = 0, transactions_process_time_full = 0;
-          size_t num_txs = 0, blockidx = 0;
-          for(const block_complete_entry& block_entry: blocks)
           {
-            if (m_stopping)
+            bool remove_spans = false;
+            LOKI_DEFER
             {
                 m_core.cleanup_handle_incoming_blocks();
                 return 1;
@@ -1391,6 +1382,7 @@ namespace cryptonote
               {
                 LOG_PRINT_CCONTEXT_L0("Failure in cleanup_handle_incoming_blocks");
                 return 1;
+                checkpoint = &checkpoint_allocated_on_stack_;
               }
 
               // in case the peer had dropped beforehand, remove the span anyway so other threads can wake up and get it
