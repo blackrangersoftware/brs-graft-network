@@ -1,4 +1,5 @@
 // Copyright (c) 2014-2019, The Monero Project
+// Copyright (c)      2018, The Loki Project
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are
@@ -30,6 +31,7 @@
 #include <boost/filesystem.hpp>
 #include <boost/format.hpp>
 #include <boost/circular_buffer.hpp>
+#include <boost/endian/conversion.hpp>
 #include <memory>  // std::unique_ptr
 #include <cstring>  // memcpy
 
@@ -3958,7 +3960,9 @@ bool BlockchainLMDB::get_block_checkpoint_internal(uint64_t height, checkpoint_t
   MDB_val value = {};
   int ret = mdb_cursor_get(m_cur_block_checkpoints, &key, &value, op);
   if (ret == MDB_SUCCESS)
+  {
     checkpoint = convert_mdb_val_to_checkpoint(value);
+  }
 
   TXN_POSTFIX_RDONLY();
   if (ret != MDB_SUCCESS && ret != MDB_NOTFOUND)
@@ -4410,7 +4414,35 @@ uint8_t BlockchainLMDB::get_hard_fork_version(uint64_t height) const
   return ret;
 }
 
-void BlockchainLMDB::add_alt_block(const crypto::hash &blkid, const cryptonote::alt_block_data_t &data, const cryptonote::blobdata &blob)
+enum struct blob_type : uint8_t
+{
+  block,
+  checkpoint
+};
+
+struct blob_header
+{
+  blob_type type;
+  uint32_t  size;
+};
+
+static blob_header write_little_endian_blob_header(blob_type type, uint32_t size)
+{
+  blob_header result = {type, size};
+  boost::endian::native_to_little_inplace(result.size);
+  boost::endian::native_to_little_inplace(result.type);
+  return result;
+}
+
+static blob_header native_endian_blob_header(const blob_header *header)
+{
+  blob_header result = {header->type, header->size};
+  boost::endian::little_to_native_inplace(result.size);
+  boost::endian::little_to_native_inplace(result.type);
+  return result;
+}
+
+void BlockchainLMDB::add_alt_block(const crypto::hash &blkid, const cryptonote::alt_block_data_t &data, const cryptonote::blobdata &block, cryptonote::blobdata const *checkpoint)
 {
   LOG_PRINT_L3("BlockchainLMDB::" << __func__);
   check_open();
@@ -4418,11 +4450,32 @@ void BlockchainLMDB::add_alt_block(const crypto::hash &blkid, const cryptonote::
 
   CURSOR(alt_blocks)
 
-  MDB_val k = {sizeof(blkid), (void *)&blkid};
-  const size_t val_size = sizeof(alt_block_data_t) + blob.size();
+  MDB_val k       = {sizeof(blkid), (void *)&blkid};
+  size_t val_size = sizeof(alt_block_data_t);
+  val_size       += sizeof(blob_header) + block.size();
+  if (checkpoint)
+    val_size     += sizeof(blob_header) + checkpoint->size();
+
   std::unique_ptr<char[]> val(new char[val_size]);
-  memcpy(val.get(), &data, sizeof(alt_block_data_t));
-  memcpy(val.get() + sizeof(alt_block_data_t), blob.data(), blob.size());
+  char *dest = val.get();
+
+  memcpy(dest, &data, sizeof(alt_block_data_t));
+  dest += sizeof(alt_block_data_t);
+
+  blob_header block_header = write_little_endian_blob_header(blob_type::block, block.size());
+  memcpy(dest, reinterpret_cast<char const *>(&block_header), sizeof(block_header));
+  dest += sizeof(block_header);
+  memcpy(dest, block.data(), block.size());
+  dest += block.size();
+
+  if (checkpoint)
+  {
+    blob_header checkpoint_header = write_little_endian_blob_header(blob_type::checkpoint, checkpoint->size());
+    memcpy(dest, reinterpret_cast<char const *>(&checkpoint_header), sizeof(checkpoint_header));
+    dest += sizeof(checkpoint_header);
+    memcpy(dest, checkpoint->data(), checkpoint->size());
+  }
+
   MDB_val v = {val_size, (void *)val.get()};
   if (auto result = mdb_cursor_put(m_cur_alt_blocks, &k, &v, MDB_NODUPDATA)) {
     if (result == MDB_KEYEXIST)
@@ -4432,7 +4485,7 @@ void BlockchainLMDB::add_alt_block(const crypto::hash &blkid, const cryptonote::
   }
 }
 
-bool BlockchainLMDB::get_alt_block(const crypto::hash &blkid, alt_block_data_t *data, cryptonote::blobdata *blob)
+bool BlockchainLMDB::get_alt_block(const crypto::hash &blkid, alt_block_data_t *data, cryptonote::blobdata *block, cryptonote::blobdata *checkpoint)
 {
   LOG_PRINT_L3("BlockchainLMDB:: " << __func__);
   check_open();
@@ -4451,11 +4504,31 @@ bool BlockchainLMDB::get_alt_block(const crypto::hash &blkid, alt_block_data_t *
   if (v.mv_size < sizeof(alt_block_data_t))
     throw0(DB_ERROR("Record size is less than expected"));
 
-  const alt_block_data_t *ptr = (const alt_block_data_t*)v.mv_data;
+  const char *src      = static_cast<const char *>(v.mv_data);
+  const char *end      = static_cast<const char *>(src + v.mv_size);
+  const auto *alt_data = (const alt_block_data_t *)src;
   if (data)
-    *data = *ptr;
-  if (blob)
-    blob->assign((const char*)(ptr + 1), v.mv_size - sizeof(alt_block_data_t));
+    *data = *alt_data;
+
+  src = reinterpret_cast<const char *>(alt_data + 1);
+  while (src < end)
+  {
+    blob_header header = native_endian_blob_header(reinterpret_cast<const blob_header *>(src));
+    src += sizeof(header);
+    if (header.type == blob_type::block)
+    {
+      if (block)
+        block->assign((const char *)src, header.size);
+    }
+    else
+    {
+      assert(header.type == blob_type::checkpoint);
+      if (checkpoint)
+        checkpoint->assign((const char *)src, header.size);
+    }
+
+    src += header.size;
+  }
 
   TXN_POSTFIX_RDONLY();
   return true;
@@ -5545,6 +5618,76 @@ void BlockchainLMDB::migrate_3_4()
   result = mdb_put(txn, m_properties, &vk, &v, 0);
   if (result)
     throw0(DB_ERROR(lmdb_error("Failed to update version for the db: ", result).c_str()));
+  txn.commit();
+}
+
+void BlockchainLMDB::migrate_4_5()
+{
+  LOG_PRINT_L3("BlockchainLMDB::" << __func__);
+  MGINFO_YELLOW("Migrating blockchain from DB version 4 to 5 - this may take a while:");
+
+  mdb_txn_safe txn(false);
+  {
+    int result = mdb_txn_begin(m_env, NULL, 0, txn);
+    if (result) throw0(DB_ERROR(lmdb_error("Failed to create a transaction for the db: ", result).c_str()));
+  }
+
+  if (auto res = mdb_dbi_open(txn, LMDB_ALT_BLOCKS, 0, &m_alt_blocks)) return;
+
+  MDB_cursor *cursor;
+  if (auto ret = mdb_cursor_open(txn, m_alt_blocks, &cursor))
+    throw0(DB_ERROR(lmdb_error("Failed to open a cursor for alt blocks: ", ret).c_str()));
+
+  struct entry_t
+  {
+    crypto::hash key;
+    alt_block_data_t data;
+    cryptonote::blobdata blob;
+  };
+
+  std::vector<entry_t> new_entries;
+  for (MDB_cursor_op op = MDB_FIRST;; op = MDB_NEXT)
+  {
+    MDB_val key, val;
+    int ret = mdb_cursor_get(cursor, &key, &val, op);
+    if (ret == MDB_NOTFOUND) break;
+    if (ret) throw0(DB_ERROR(lmdb_error("Failed to enumerate alt blocks: ", ret).c_str()));
+
+    entry_t entry = {};
+
+    if (val.mv_size < sizeof(alt_block_data_1_t)) throw0(DB_ERROR("Record size is less than expected"));
+    const auto *data = (const alt_block_data_1_t *)val.mv_data;
+    entry.blob.assign((const char *)(data + 1), val.mv_size - sizeof(*data));
+
+    entry.key                          = *(crypto::hash const *)key.mv_data;
+    entry.data.height                  = data->height;
+    entry.data.cumulative_weight       = data->cumulative_weight;
+    entry.data.cumulative_difficulty   = data->cumulative_difficulty;
+    entry.data.already_generated_coins = data->already_generated_coins;
+    new_entries.push_back(entry);
+  }
+
+  {
+    int ret = mdb_drop(txn, m_alt_blocks, 0 /*empty the db but don't delete handle*/);
+    if (ret && ret != MDB_NOTFOUND)
+        throw0(DB_ERROR(lmdb_error("Failed to drop m_alt_blocks: ", ret).c_str()));
+  }
+
+  for (entry_t const &entry : new_entries)
+  {
+    blob_header block_header = write_little_endian_blob_header(blob_type::block, entry.blob.size());
+    const size_t val_size    = sizeof(entry.data) + sizeof(block_header) + entry.blob.size();
+    std::unique_ptr<char[]> val_buf(new char[val_size]);
+
+    memcpy(val_buf.get(), &entry.data, sizeof(entry.data));
+    memcpy(val_buf.get() + sizeof(entry.data), reinterpret_cast<const char *>(&block_header), sizeof(block_header));
+    memcpy(val_buf.get() + sizeof(entry.data) + sizeof(block_header), entry.blob.data(), entry.blob.size());
+
+    MDB_val_set(key, entry.key);
+    MDB_val val = {val_size, (void *)val_buf.get()};
+    int ret = mdb_cursor_put(cursor, &key, &val, 0);
+    if (ret) throw0(DB_ERROR(lmdb_error("Failed to re-update alt block data: ", ret).c_str()));
+  }
   txn.commit();
 }
 

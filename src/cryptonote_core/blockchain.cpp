@@ -197,8 +197,25 @@ static const struct {
  // TODO: launch stagenet
 };
 
+<<<<<<< HEAD
 
 
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+=======
+Blockchain::block_extended_info::block_extended_info(const alt_block_data_t &src, block const &blk, checkpoint_t const *checkpoint)
+{
+  assert((src.checkpointed) == (checkpoint != nullptr));
+  *this                         = {};
+  this->bl                      = blk;
+  this->checkpointed            = src.checkpointed;
+  if (checkpoint) this->checkpoint = *checkpoint;
+  this->height                  = src.height;
+  this->block_cumulative_weight = src.cumulative_weight;
+  this->cumulative_difficulty   = src.cumulative_difficulty;
+  this->already_generated_coins = src.already_generated_coins;
+}
+
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
 //------------------------------------------------------------------
 Blockchain::Blockchain(tx_memory_pool& tx_pool)
 : m_db(), m_tx_pool(tx_pool), m_hardfork(NULL), m_timestamps_and_difficulties_height(0), m_current_block_cumul_weight_limit(0), m_current_block_cumul_weight_median(0),
@@ -918,7 +935,7 @@ bool Blockchain::get_block_by_hash(const crypto::hash &h, block &blk, bool *orph
   {
     alt_block_data_t data;
     cryptonote::blobdata blob;
-    if (m_db->get_alt_block(h, &data, &blob))
+    if (m_db->get_alt_block(h, &data, &blob, nullptr /*checkpoint*/))
     {
       if (!cryptonote::parse_and_validate_block_from_blob(blob, blk))
       {
@@ -1059,7 +1076,13 @@ std::vector<time_t> Blockchain::get_last_block_timestamps(unsigned int blocks) c
 // This function removes blocks from the blockchain until it gets to the
 // position where the blockchain switch started and then re-adds the blocks
 // that had been removed.
+<<<<<<< HEAD
 bool Blockchain::rollback_blockchain_switching(const std::list<block>& original_chain, uint64_t rollback_height)
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+bool Blockchain::rollback_blockchain_switching(std::list<block>& original_chain, uint64_t rollback_height)
+=======
+bool Blockchain::rollback_blockchain_switching(const std::list<block_and_checkpoint>& original_chain, uint64_t rollback_height)
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
 {
   LOG_PRINT_L3("Blockchain::" << __func__);
   CRITICAL_REGION_LOCAL(m_blockchain_lock);
@@ -1082,15 +1105,14 @@ bool Blockchain::rollback_blockchain_switching(const std::list<block>& original_
   m_hardfork->reorganize_from_chain_height(rollback_height);
 
   //return back original chain
-  for (auto& bl : original_chain)
+  for (auto& entry : original_chain)
   {
     block_verification_context bvc = boost::value_initialized<block_verification_context>();
-    bool r = handle_block_to_main_chain(bl, bvc);
+    bool r = handle_block_to_main_chain(entry.block, cryptonote::get_block_hash(entry.block), bvc, entry.checkpointed ? &entry.checkpoint : nullptr);
     CHECK_AND_ASSERT_MES(r && bvc.m_added_to_main_chain, false, "PANIC! failed to add (again) block while chain switching during the rollback!");
   }
 
   m_hardfork->reorganize_from_chain_height(rollback_height);
-
   MINFO("Rollback to height " << rollback_height << " was successful.");
   if (!original_chain.empty())
   {
@@ -1101,7 +1123,13 @@ bool Blockchain::rollback_blockchain_switching(const std::list<block>& original_
 //------------------------------------------------------------------
 // This function attempts to switch to an alternate chain, returning
 // boolean based on success therein.
+<<<<<<< HEAD
 bool Blockchain::switch_to_alternative_blockchain(std::list<block_extended_info>& alt_chain, bool discard_disconnected_chain)
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+bool Blockchain::switch_to_alternative_blockchain(std::list<block_extended_info>& alt_chain, bool keep_disconnected_chain)
+=======
+bool Blockchain::switch_to_alternative_blockchain(const std::list<block_extended_info>& alt_chain, bool keep_disconnected_chain)
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
 {
   LOG_PRINT_L3("Blockchain::" << __func__);
   CRITICAL_REGION_LOCAL(m_blockchain_lock);
@@ -1120,15 +1148,53 @@ bool Blockchain::switch_to_alternative_blockchain(std::list<block_extended_info>
 
   // pop blocks from the blockchain until the top block is the parent
   // of the front block of the alt chain.
-  std::list<block> disconnected_chain;
+  std::list<block_and_checkpoint> disconnected_chain; // TODO(loki): use a vector and rbegin(), rend() because we don't have push_front
   while (m_db->top_block_hash() != alt_chain.front().bl.prev_id)
   {
-    block b = pop_block_from_blockchain();
-    disconnected_chain.push_front(b);
+    block_and_checkpoint entry = {};
+    entry.block                = pop_block_from_blockchain();
+    entry.checkpointed         = m_db->get_block_checkpoint(cryptonote::get_block_height(entry.block), entry.checkpoint);
+    disconnected_chain.push_front(entry);
   }
 
   auto split_height = m_db->height();
+<<<<<<< HEAD
 
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+
+  // TODO(loki): This is a work around for sometimes reorganising the blockchain causing inconsistent difficulty values
+  LOKI_DEFER
+  {
+    if (nettype() == MAINNET)
+    {
+      uint64_t const FUDGE                             = 60;
+      cryptonote::BlockchainDB::fixup_context context  = {};
+      context.type                                     = cryptonote::BlockchainDB::fixup_type::calculate_difficulty;
+      context.calculate_difficulty_params.start_height = split_height < FUDGE ? 0 : split_height - FUDGE;
+      m_db->fixup(context);
+    }
+  };
+
+  for (BlockchainDetachedHook* hook : m_blockchain_detached_hooks)
+    hook->blockchain_detached(split_height);
+
+=======
+  LOKI_DEFER // TODO(loki): This is a work around for sometimes reorganising the blockchain causing inconsistent difficulty values
+  {
+    if (nettype() == MAINNET)
+    {
+      uint64_t const FUDGE                             = 60;
+      cryptonote::BlockchainDB::fixup_context context  = {};
+      context.type                                     = cryptonote::BlockchainDB::fixup_type::calculate_difficulty;
+      context.calculate_difficulty_params.start_height = split_height < FUDGE ? 0 : split_height - FUDGE;
+      m_db->fixup(context);
+    }
+  };
+
+  for (BlockchainDetachedHook* hook : m_blockchain_detached_hooks)
+    hook->blockchain_detached(split_height);
+
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
   //connecting new alternative chain
   for(auto alt_ch_iter = alt_chain.begin(); alt_ch_iter != alt_chain.end(); alt_ch_iter++)
   {
@@ -1136,7 +1202,7 @@ bool Blockchain::switch_to_alternative_blockchain(std::list<block_extended_info>
     block_verification_context bvc = boost::value_initialized<block_verification_context>();
 
     // add block to main chain
-    bool r = handle_block_to_main_chain(bei.bl, bvc);
+    bool r = handle_block_to_main_chain(bei.bl, cryptonote::get_block_hash(bei.bl), bvc, bei.checkpointed ? &bei.checkpoint : nullptr);
 
     // if adding block to main chain failed, rollback to previous state and
     // return false
@@ -1177,8 +1243,16 @@ bool Blockchain::switch_to_alternative_blockchain(std::list<block_extended_info>
     for (auto& old_ch_ent : disconnected_chain)
     {
       block_verification_context bvc = boost::value_initialized<block_verification_context>();
+<<<<<<< HEAD
       bool r = handle_alternative_block(old_ch_ent, get_block_hash(old_ch_ent), bvc);
       if(!r)
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+      bool r = handle_alternative_block(old_ch_ent, get_block_hash(old_ch_ent), bvc, nullptr /*checkpoint*/);
+      if (!r)
+=======
+      bool r = handle_alternative_block(old_ch_ent.block, cryptonote::get_block_hash(old_ch_ent.block), bvc, old_ch_ent.checkpointed ? &old_ch_ent.checkpoint : nullptr);
+      if (!r)
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
       {
         MERROR("Failed to push ex-main chain blocks to alternative chain ");
         // previously this would fail the blockchain switching, but I don't
@@ -1208,7 +1282,7 @@ bool Blockchain::switch_to_alternative_blockchain(std::list<block_extended_info>
 //------------------------------------------------------------------
 // This function calculates the difficulty target for the block being added to
 // an alternate chain.
-difficulty_type Blockchain::get_next_difficulty_for_alternative_chain(const std::list<block_extended_info>& alt_chain, block_extended_info& bei) const
+difficulty_type Blockchain::get_next_difficulty_for_alternative_chain(const std::list<block_extended_info>& alt_chain, uint64_t alt_block_height) const
 {
   if (m_fixed_difficulty)
   {
@@ -1237,7 +1311,7 @@ difficulty_type Blockchain::get_next_difficulty_for_alternative_chain(const std:
     CRITICAL_REGION_LOCAL(m_blockchain_lock);
 
     // Figure out start and stop offsets for main chain blocks
-    size_t main_chain_stop_offset = alt_chain.size() ? alt_chain.front().height : bei.height;
+    size_t main_chain_stop_offset = alt_chain.size() ? alt_chain.front().height : alt_block_height;
     size_t main_chain_count = difficulty_blocks_count - std::min(static_cast<size_t>(difficulty_blocks_count), alt_chain.size());
     main_chain_count = std::min(main_chain_count, main_chain_stop_offset);
     size_t main_chain_start_offset = main_chain_stop_offset - main_chain_count;
@@ -1280,8 +1354,27 @@ difficulty_type Blockchain::get_next_difficulty_for_alternative_chain(const std:
     }
   }
   // FIXME: This will fail if fork activation heights are subject to voting
+<<<<<<< HEAD
   size_t target = ideal_hardfork_version < 2 ? DIFFICULTY_TARGET_V1 : DIFFICULTY_TARGET_V2;
   difficulty_type result = 0;
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+  size_t target = DIFFICULTY_TARGET_V2;
+
+  // HF12 switches to RandomX with a likely drastically reduced hashrate versus Turtle, so override
+  // difficulty for the first difficulty window blocks:
+  uint64_t hf12_height = m_hardfork->get_earliest_ideal_height_for_version(network_version_12_checkpointing);
+
+  uint64_t height = (alt_chain.size() ? alt_chain.front().height : bei.height) + alt_chain.size() + 1;
+
+=======
+  size_t target = DIFFICULTY_TARGET_V2;
+
+  // HF12 switches to RandomX with a likely drastically reduced hashrate versus Turtle, so override
+  // difficulty for the first difficulty window blocks:
+  uint64_t hf12_height = m_hardfork->get_earliest_ideal_height_for_version(network_version_12_checkpointing);
+  uint64_t height = (alt_chain.size() ? alt_chain.front().height : alt_block_height) + alt_chain.size() + 1;
+
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
   // calculate the difficulty target for the block and return it
   if (ideal_hardfork_version < 8) {
       LOG_PRINT_L2("old difficulty algo");
@@ -1503,7 +1596,7 @@ bool Blockchain::create_block_template(block& b, const crypto::hash *from_block,
     //block is not related with head of main chain
     //first of all - look in alternative chains container
     alt_block_data_t prev_data;
-    bool parent_in_alt = m_db->get_alt_block(*from_block, &prev_data, NULL);
+    bool parent_in_alt = m_db->get_alt_block(*from_block, &prev_data, NULL, nullptr /*checkpoint*/);
     bool parent_in_main = m_db->block_exists(*from_block);
     if (!parent_in_alt && !parent_in_main)
     {
@@ -1551,7 +1644,7 @@ bool Blockchain::create_block_template(block& b, const crypto::hash *from_block,
     bei.bl = b;
     bei.height = alt_chain.size() ? prev_data.height + 1 : m_db->get_block_height(*from_block) + 1;
 
-    diffic = get_next_difficulty_for_alternative_chain(alt_chain, bei);
+    diffic = get_next_difficulty_for_alternative_chain(alt_chain, bei.height);
   }
   else
   {
@@ -1738,7 +1831,26 @@ bool Blockchain::build_alt_chain(const crypto::hash &prev_id, std::list<block_ex
     cryptonote::blobdata blob;
     bool found = m_db->get_alt_block(prev_id, &data, &blob);
     timestamps.clear();
+<<<<<<< HEAD
     while(found)
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+
+    if (num_checkpoints) *num_checkpoints = 0;
+    crypto::hash prev_hash = crypto::null_hash;
+    block_extended_info bei = {};
+    for(bool found = m_db->get_alt_block(prev_id, &data, &blob);
+        found;
+        found = m_db->get_alt_block(prev_hash, &data, &blob))
+=======
+
+    if (num_checkpoints) *num_checkpoints = 0;
+    crypto::hash prev_hash = crypto::null_hash;
+    block_extended_info bei = {};
+    blobdata checkpoint_blob;
+    for(bool found = m_db->get_alt_block(prev_id, &data, &blob, &checkpoint_blob);
+        found;
+        found = m_db->get_alt_block(prev_hash, &data, &blob, &checkpoint_blob))
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
     {
       block_extended_info bei;
       CHECK_AND_ASSERT_MES(cryptonote::parse_and_validate_block_from_blob(blob, bei.bl), false, "Failed to parse alt block");
@@ -1746,6 +1858,21 @@ bool Blockchain::build_alt_chain(const crypto::hash &prev_id, std::list<block_ex
       bei.block_cumulative_weight = data.cumulative_weight;
       bei.cumulative_difficulty = data.cumulative_difficulty;
       bei.already_generated_coins = data.already_generated_coins;
+<<<<<<< HEAD
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+
+      prev_hash = bei.bl.prev_id;
+=======
+      bei.checkpointed            = data.checkpointed;
+      if (bei.checkpointed)
+      {
+        CHECK_AND_ASSERT_MES(t_serializable_object_from_blob(bei.checkpoint, checkpoint_blob),
+                             false,
+                             "Failed to parse alt checkpoint from blob");
+      }
+
+      prev_hash = bei.bl.prev_id;
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
       timestamps.push_back(bei.bl.timestamp);
       alt_chain.push_front(std::move(bei));
       found = m_db->get_alt_block(bei.bl.prev_id, &data, &blob);
@@ -1851,9 +1978,15 @@ bool Blockchain::handle_alternative_block(const block& b, const crypto::hash& id
     }
 
     // Check the block's hash against the difficulty target for its alt chain
+<<<<<<< HEAD
     difficulty_type current_diff = get_next_difficulty_for_alternative_chain(alt_chain, block_height);
     
 
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+    difficulty_type current_diff = get_next_difficulty_for_alternative_chain(alt_chain, bei);
+=======
+    difficulty_type current_diff = get_next_difficulty_for_alternative_chain(alt_chain, block_height);
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
     CHECK_AND_ASSERT_MES(current_diff, false, "!!!!!!! DIFFICULTY OVERHEAD !!!!!!!");
     crypto::hash proof_of_work = null_hash;
     if (b.major_version >= cryptonote::network_version_18_checkpointing)
@@ -1912,6 +2045,7 @@ bool Blockchain::handle_alternative_block(const block& b, const crypto::hash& id
 
     // add block to alternate blocks storage,
     // as well as the current "alt chain" container
+<<<<<<< HEAD
     CHECK_AND_ASSERT_MES(!m_db->get_alt_block(id, NULL, NULL, NULL), false, "insertion of new alternative block returned as it already exists");
     {
       cryptonote::blobdata checkpoint_blob;
@@ -1939,6 +2073,37 @@ bool Blockchain::handle_alternative_block(const block& b, const crypto::hash& id
       }
     }
     alt_chain.push_back(block_extended_info(alt_data, b, checkpoint));
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+    CHECK_AND_ASSERT_MES(!m_db->get_alt_block(id, NULL, NULL), false, "insertion of new alternative block returned as it already exists");
+    cryptonote::alt_block_data_t data = {};
+    data.height                       = bei.height;
+    data.cumulative_weight            = bei.block_cumulative_weight;
+    data.cumulative_difficulty        = bei.cumulative_difficulty;
+    data.already_generated_coins      = bei.already_generated_coins;
+    data.checkpointed                 = (checkpoint != nullptr);
+    m_db->add_alt_block(id, data, cryptonote::block_to_blob(bei.bl));
+    alt_chain.push_back(bei);
+    if (data.checkpointed) num_checkpoints_on_alt_chain++;
+=======
+    CHECK_AND_ASSERT_MES(!m_db->get_alt_block(id, NULL, NULL, NULL), false, "insertion of new alternative block returned as it already exists");
+    {
+      cryptonote::blobdata checkpoint_blob;
+      if (checkpoint)
+      {
+        alt_data.checkpointed = true;
+        checkpoint_blob       = t_serializable_object_to_blob(*checkpoint);
+        num_checkpoints_on_alt_chain++;
+      }
+
+      alt_data.height                   = block_height;
+      // TODO(loki): Block cumulative weight wasn't being set in the fist place in bei?
+      // alt_data.cumulative_weight       = bei.block_cumulative_weight;
+      alt_data.already_generated_coins  = get_outs_money_amount(b.miner_tx);
+      alt_data.already_generated_coins += (alt_chain.size() ? prev_data.already_generated_coins : m_db->get_block_already_generated_coins(block_height - 1));
+      m_db->add_alt_block(id, alt_data, cryptonote::block_to_blob(b), checkpoint_blob.empty() ? nullptr : &checkpoint_blob);
+    }
+    alt_chain.push_back(block_extended_info(alt_data, b, checkpoint));
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
 
     // NOTE: Block is within the allowable service node reorg window due to passing is_alternative_block_allowed().
     // So we don't need to check that this block matches the checkpoint unless it's a hardcoded checkpoint, in which
@@ -1955,9 +2120,25 @@ bool Blockchain::handle_alternative_block(const block& b, const crypto::hash& id
       }
     }
 
+<<<<<<< HEAD
     bool alt_chain_has_greater_pow       = alt_data.cumulative_difficulty > main_chain_cumulative_difficulty;
     bool alt_chain_has_more_checkpoints  = (num_checkpoints_on_alt_chain > num_checkpoints_on_chain);
     bool alt_chain_has_equal_checkpoints = (num_checkpoints_on_alt_chain == num_checkpoints_on_chain);
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+    uint64_t last_block_height                  = alt_chain.back().height;
+    std::vector<checkpoint_t> const checkpoints = m_db->get_checkpoints_range(curr_blockchain_height, last_block_height, num_checkpoints_on_alt_chain + 1);
+    bool alt_chain_has_greater_pow              = bei.cumulative_difficulty > main_chain_cumulative_difficulty;
+    bool alt_chain_has_more_checkpoints         = (num_checkpoints_on_alt_chain > static_cast<int>(checkpoints.size()));
+    bool alt_chain_has_equal_checkpoints        = (num_checkpoints_on_alt_chain == static_cast<int>(checkpoints.size()));
+
+=======
+    uint64_t last_block_height                  = alt_chain.back().height;
+    std::vector<checkpoint_t> const checkpoints = m_db->get_checkpoints_range(curr_blockchain_height, last_block_height, num_checkpoints_on_alt_chain + 1);
+    bool alt_chain_has_greater_pow              = alt_data.cumulative_difficulty > main_chain_cumulative_difficulty;
+    bool alt_chain_has_more_checkpoints         = (num_checkpoints_on_alt_chain > static_cast<int>(checkpoints.size()));
+    bool alt_chain_has_equal_checkpoints        = (num_checkpoints_on_alt_chain == static_cast<int>(checkpoints.size()));
+
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
     {
       std::vector<transaction> txs;
       std::vector<crypto::hash> missed;
@@ -1980,14 +2161,26 @@ bool Blockchain::handle_alternative_block(const block& b, const crypto::hash& id
       {
         bool keep_alt_chain = false;
         if (alt_chain_has_more_checkpoints)
+<<<<<<< HEAD
         {
           MGINFO_GREEN("###### REORGANIZE on height: " << alt_chain.front().height << " of " << m_db->height() - 1 << ", checkpoint is found in alternative chain on height " << block_height);
         }
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+          MGINFO_GREEN("###### REORGANIZE on height: " << alt_chain.front().height << " of " << m_db->height() - 1 << ", checkpoint is found in alternative chain on height " << bei.height);
+=======
+          MGINFO_GREEN("###### REORGANIZE on height: " << alt_chain.front().height << " of " << m_db->height() - 1 << ", checkpoint is found in alternative chain on height " << block_height);
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
         else
+<<<<<<< HEAD
         {
           keep_alt_chain = true;
           MGINFO_GREEN("###### REORGANIZE on height: " << alt_chain.front().height << " of " << m_db->height() - 1 << " with cum_difficulty " << m_db->get_block_cumulative_difficulty(m_db->height() - 1) << std::endl << " alternative blockchain size: " << alt_chain.size() << " with cum_difficulty " << alt_data.cumulative_difficulty);
         }
+||||||| parent of 3fd0face4... Store alt checkpoints into the db to be applied on reorg
+          MGINFO_GREEN("###### REORGANIZE on height: " << alt_chain.front().height << " of " << m_db->height() - 1 << " with cum_difficulty " << m_db->get_block_cumulative_difficulty(m_db->height() - 1) << std::endl << " alternative blockchain size: " << alt_chain.size() << " with cum_difficulty " << bei.cumulative_difficulty);
+=======
+          MGINFO_GREEN("###### REORGANIZE on height: " << alt_chain.front().height << " of " << m_db->height() - 1 << " with cum_difficulty " << m_db->get_block_cumulative_difficulty(m_db->height() - 1) << std::endl << " alternative blockchain size: " << alt_chain.size() << " with cum_difficulty " << alt_data.cumulative_difficulty);
+>>>>>>> 3fd0face4... Store alt checkpoints into the db to be applied on reorg
 
         bool r = switch_to_alternative_blockchain(alt_chain, keep_alt_chain);
         if (r)
@@ -2684,7 +2877,7 @@ bool Blockchain::have_block(const crypto::hash& id) const
     return true;
   }
 
-  if(m_db->get_alt_block(id, NULL, NULL))
+  if(m_db->get_alt_block(id, NULL, NULL, NULL))
   {
     LOG_PRINT_L2("block " << id << " found in alternative chains");
     return true;
@@ -3943,12 +4136,17 @@ leave:
   // is correct.
   if(m_checkpoints.is_in_checkpoint_zone(blockchain_height))
   {
-    if(!m_checkpoints.check_block(blockchain_height, id))
+    bool rta_checkpoint = false;
+    if(!m_checkpoints.check_block(blockchain_height, id, nullptr, &rta_checkpoint))
     {
-      LOG_ERROR("CHECKPOINT VALIDATION FAILED");
-      bvc.m_verifivation_failed = true;
-      goto leave;
+      if (!rta_checkpoint || (service_node_checkpoint && bl.major_version >= cryptonote::network_version_18_checkpoints))
+      {
+        LOG_ERROR("CHECKPOINT VALIDATION FAILED");
+        bvc.m_verifivation_failed = true;
+        goto leave;
+      }
     }
+
   }
 
   TIME_MEASURE_FINISH(longhash_calculating_time);
@@ -4047,7 +4245,7 @@ leave:
 #endif
     {
       // validate that transaction inputs and the keys spending them are correct.
-      tx_verification_context tvc;
+      tx_verification_context tvc = AUTO_VAL_INIT(tvc);
       if(!check_tx_inputs(tx, tvc))
       {
         MERROR_VER("Block with id: " << id  << " has at least one transaction (id: " << tx_id << ") with wrong inputs.");
@@ -4150,8 +4348,14 @@ leave:
   {
     LOG_ERROR("Blocks that failed verification should not reach here");
   }
-  // TODO: implement "defer" call same as loki does
-  
+
+  // TODO(loki): Not nice, making the hook take in a vector of pair<transaction,
+  // blobdata> messes with service_node_list::init which only constructs
+  // a vector of transactions and then subsequently calls block_added, so the
+  // init step would have to intentionally allocate the blobs or retrieve them
+  // from the DB.
+  // Secondly we don't use the blobs at all in the hooks, so passing it in
+  // doesn't seem right.
   std::vector<transaction> only_txs;
   only_txs.reserve(txs.size());
   for (std::pair<transaction, blobdata> const &tx_pair : txs)
@@ -4440,7 +4644,7 @@ bool Blockchain::update_checkpoints(const std::string& file_path)
       {
         // roll back to a couple of blocks before the checkpoint
         LOG_ERROR("Local blockchain failed to pass a checkpoint, rolling back!");
-        std::list<block> empty;
+        std::list<block_and_checkpoint> empty;
         rollback_blockchain_switching(empty, block_height- 2);
         result = false;
       }
@@ -4459,12 +4663,6 @@ bool Blockchain::update_checkpoint(cryptonote::checkpoint_t const &checkpoint)
   return result;
 }
 //------------------------------------------------------------------
-bool Blockchain::update_checkpoint(cryptonote::checkpoint_t const &checkpoint)
-{
-  auto lock = tools::unique_lock(*this);
-  bool result = m_checkpoints.update_checkpoint(checkpoint);
-  return result;
-}
 
 bool Blockchain::get_checkpoint(uint64_t height, checkpoint_t &checkpoint) const
 {
@@ -4729,39 +4927,6 @@ bool Blockchain::prepare_handle_incoming_blocks(const std::vector<block_complete
     m_blockchain_lock.lock();
   }
   m_batch_success = true;
-
-  // TODO(loki): Always parse checkpoints, but block syncing have a caching
-  // layer that is pretty complicated but would be nice to have an equivalent
-  // for checkpoints.
-
-  // Place parsing before early returns since the caching layer seems to make
-  // this function early return in the common case, so always ensure checkpoints
-  // are parsed out.
-  for (size_t i = 0; i < blocks.size(); i++)
-  {
-    blobdata const &checkpoint_blob = blocks_entry[i].checkpoint;
-    block const &block              = blocks[i];
-    uint64_t block_height           = get_block_height(block);
-    bool maybe_has_checkpoint       = (block_height % service_nodes::CHECKPOINT_INTERVAL == 0);
-
-    if (checkpoint_blob.size() && !maybe_has_checkpoint)
-    {
-      MDEBUG("Checkpoint blob given but not expecting a checkpoint at this height");
-      return false;
-    }
-
-    if (checkpoint_blob.size())
-    {
-      checkpoint_t checkpoint;
-      if (!t_serializable_object_from_blob(checkpoint, checkpoint_blob))
-      {
-        MDEBUG("Checkpoint blob available but failed to parse");
-        return false;
-      }
-
-      checkpoints.push_back(checkpoint);
-    }
-  }
 
   const uint64_t height = m_db->height();
   if ((height + blocks_entry.size()) < m_blocks_hash_check.size())

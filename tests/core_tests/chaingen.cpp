@@ -130,6 +130,22 @@ void linear_chain_generator::rewind_until_version(int hard_fork_version)
     gen_.m_hf_version = hard_forks_[i].first;
     create_block();
 
+    service_nodes::block_winner winner  = prev.service_node_state.get_block_winner();
+    std::vector<uint64_t> block_weights = last_n_block_weights(new_height - 1, CRYPTONOTE_REWARD_BLOCKS_WINDOW);
+    create_loki_blockchain_entry(result,
+                                 desired_hf,
+                                 prev,
+                                 first_miner_,
+                                 prev.block.timestamp + DIFFICULTY_TARGET_V2,
+                                 block_weights,
+                                 txs,
+                                 winner);
+
+    loki_block_with_checkpoint data = {};
+    data.has_checkpoint             = checkpoint != nullptr;
+    data.block                      = result.block;
+    if (data.has_checkpoint) data.checkpoint = *checkpoint;
+    events_.push_back(loki_blockchain_addable<loki_block_with_checkpoint>(data, can_be_added_to_blockchain, fail_msg));
   }
 
   assert(gen_.m_hf_version >= hard_fork_version);
